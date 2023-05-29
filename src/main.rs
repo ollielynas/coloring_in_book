@@ -4,10 +4,17 @@ use macroquad::{prelude::*, miniquad::{Texture, fs}, input::KeyCode};
 use egui_phosphor::*;
 use ImageFormat::Jpeg;
 
-use std::{fs::{File, read_dir}, path::PathBuf, str::FromStr, io::Write, collections::HashMap, time::Instant};
+use std::{fs::{File, read_dir}, path::PathBuf, str::FromStr, io::Write, collections::HashMap, time::Instant, thread::JoinHandle};
 use zip_extensions::*;
 use ::rand::{thread_rng, Rng}; // 0.8.5
 use egui_extras::RetainedImage;
+
+extern crate savefile;
+use savefile::prelude::*;
+
+#[macro_use]
+extern crate savefile_derive;
+
 
 
 const SPEED: f32 = 160.0;
@@ -80,8 +87,12 @@ impl Drawing {
 
 }
 
-
+#[derive(Savefile)]
 struct Pen {
+    color_rgb: [u8; 3],
+
+    #[savefile_introspect_ignore]
+    #[savefile_ignore]
     color: Color32,
     size: f32,
     fade: f32,
@@ -95,6 +106,7 @@ impl Default for Pen {
     fn default() -> Self {
         Pen {
             color: Color32::from_rgba_premultiplied(0, 255, 0, 255/4),
+            color_rgb: [0, 255, 0],
             size: 5.0,
             fade: 0.0,
             alpha: 0.2,
@@ -103,6 +115,7 @@ impl Default for Pen {
             outline: true,
         }
     }
+    
 }
 
 impl Pen {
@@ -111,12 +124,12 @@ impl Pen {
         .open(&mut self.window_open)
             .show(egui_ctx, |ui| {
                 
-                ui.add(egui::Slider::new(&mut self.size, 0.0..=20.0).text("size"));
-                ui.add(egui::Slider::new(&mut self.fade, 0.0..=1.0).text("fade"));
+                ui.add(egui::Slider::new(&mut self.size, 0.0..=30.0).text("size"));
                 ui.add(egui::Slider::new(&mut self.alpha, 0.0..=1.0).text("alpha")).changed().then(|| {
                     self.color = Color32::from_rgba_premultiplied(self.color.r(), self.color.g(), self.color.b(), (self.alpha * 255.0) as u8);
                 });
                 ui.checkbox(&mut self.inside_circle, "inside circle");
+                ui.checkbox(&mut self.outline, "outline");
                 ui.color_edit_button_srgba(&mut self.color).changed().then(||{
                     self.alpha = self.color.a() as f32 / 255.0;
                 });
@@ -127,7 +140,7 @@ impl Pen {
         macroquad::color::Color::new(self.color.r() as f32 / 255.0, self.color.g() as f32 / 255.0, self.color.b() as f32 / 255.0, self.alpha)
     }
 }
-
+#[derive(Savefile)]
 struct Data {
     saved_pens: Vec<Pen>,
     names: HashMap<usize, String>
@@ -139,6 +152,28 @@ impl Data {
             saved_pens: vec![Pen::default()],
             names: HashMap::new(),
         }
+    }
+
+    fn save(&mut self) {
+        for pen in self.saved_pens.iter_mut() {
+            pen.color_rgb = [pen.color.r(), pen.color.g(), pen.color.b()];
+        }
+        save_file("img/save.bin", 1, self);
+    }
+
+    fn load() -> Self {
+        let mut save = Data::new();
+        let load:Result<Data, SavefileError> = savefile::load_file("img/save.bin", 1);
+        if let Ok(mut f) = load {
+            for pen in f.saved_pens.iter_mut() {
+                pen.color = Color32::from_rgba_premultiplied(pen.color_rgb[0], pen.color_rgb[1], pen.color_rgb[2], (pen.alpha * 255.0) as u8);
+            }
+            save = f;
+        };
+
+        return save;
+
+
     }
 }
 
@@ -166,6 +201,8 @@ async fn main() {
     let mut scrapbook_open = false;
 
     let mut save = Instant::now();
+
+    let mut saved_thread: Option<JoinHandle<()>> = None;
     
     // list dir
     if let Ok(dir) = read_dir("img") {
@@ -185,6 +222,8 @@ async fn main() {
         }
     }
 
+    
+
 
     egui_macroquad::ui(|egui_ctx| {
             
@@ -195,6 +234,15 @@ async fn main() {
         
         loop {
 
+        // prevent close
+        
+        macroquad::input::prevent_quit();
+        if is_quit_requested() {
+            if let Some( save_thread) = saved_thread {
+                save_thread.join().unwrap();
+            }
+            break;
+        }
 
         
         let mut scroll_delta = 0.0;
@@ -215,9 +263,19 @@ async fn main() {
             if let Some(new_data) = &new_data {
 
                 // spawn thread
+
+
+
                 let new_data = new_data.clone();
                 let selected_drawing = selected_drawing;
-                std::thread::spawn(move || {
+
+                if let Some(ref mut save_thread2) = saved_thread {
+                    if save_thread2.is_finished() {
+                        saved_thread = None;
+                    }
+                }
+                if saved_thread.is_none() {
+                saved_thread = Some(std::thread::spawn(move || {
                     // save image
                     let path = format!("img/sketch_{num}/new_sketch_{num}.jpg", num=selected_drawing);
                     let raw = new_data.get_image_data().to_vec();
@@ -229,7 +287,8 @@ async fn main() {
                     if let Ok(encoder) = encoder {
                         println!("{:?}", encoder.encode(&raw, new_data.width() as u16, new_data.height() as u16, ColorType::Rgb));
                     };
-                });
+                }));
+            }
 
 
 
@@ -263,7 +322,7 @@ async fn main() {
         }
 
         if is_key_down(KeyCode::Q) {
-            pen.size = (pen.size - scroll_delta * 100.0).clamp(0.0, 20.0);
+            pen.size = (pen.size - scroll_delta * 100.0).clamp(0.0, 30.0);
         }
 
         
@@ -485,9 +544,12 @@ match og_data {
         
         // Draw things after egui
 
-
+        
         if !hover {
-
+            
+            if pen.outline {
+                draw_circle_lines(mouse_position().0, mouse_position().1, pen.size, 1.0,GRAY);
+            }
             
             macroquad::input::show_mouse(false);
 
@@ -498,7 +560,9 @@ match og_data {
                 false => {
                     draw_circle_lines(mouse_position().0, mouse_position().1, pen.size, 3.0,pen.macroquad_color());
                 }
+
             }
+            
         }else {
             match pen.inside_circle {
                 true => {
@@ -514,4 +578,6 @@ match og_data {
         
         next_frame().await;
     }
+
+
 }
