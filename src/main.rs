@@ -1,12 +1,9 @@
-use egui::Color32;
+use egui::{Color32, Ui};
 use jpeg_encoder::{Encoder, ColorType};
-use macroquad::{prelude::*, miniquad::{Texture, fs}, input::KeyCode};
-use egui_phosphor::*;
-use ImageFormat::Jpeg;
+use macroquad::{prelude::*, input::KeyCode};
 
 use std::{fs::{File, read_dir}, path::PathBuf, str::FromStr, io::Write, collections::HashMap, time::Instant, thread::JoinHandle};
 use zip_extensions::*;
-use ::rand::{thread_rng, Rng}; // 0.8.5
 
 extern crate savefile;
 use savefile::prelude::*;
@@ -19,7 +16,6 @@ extern crate savefile_derive;
 const SPEED: f32 = 160.0;
 
 struct Drawing {
-    path: PathBuf,
     og_image: Option<macroquad::texture::Texture2D>,
     new_image: Option<macroquad::texture::Texture2D>,
 
@@ -36,7 +32,7 @@ impl Drawing {
         
     
         let name = name_list[num].clone();
-        let archive_file = PathBuf::from_str(r#"img/zipped_img.zip"#).unwrap();
+        let archive_file = PathBuf::from_str(r#"img/processed.zip"#).unwrap();
         let entry_path = PathBuf::from_str(&name).unwrap();
         
         if read_dir(format!("img/sketch_{num}")).is_err() {
@@ -72,7 +68,7 @@ impl Drawing {
     };
 
         
-        Drawing { path:entry_path, og_image: image, new_image
+        Drawing { og_image: image, new_image
         
         
         }
@@ -113,10 +109,8 @@ impl Default for Pen {
 }
 
 impl Pen {
-    fn render_pen(&mut self, egui_ctx: &egui::Context) {
-        egui::Window::new("Pen")
-        .open(&mut self.window_open)
-            .show(egui_ctx, |ui| {
+    fn render_pen(&mut self, ui: &mut Ui) {
+
                 
                 ui.add(egui::Slider::new(&mut self.size, 0.0..=30.0).text("size"));
                 ui.add(egui::Slider::new(&mut self.alpha, 0.0..=1.0).text("alpha")).changed().then(|| {
@@ -127,7 +121,7 @@ impl Pen {
                 ui.color_edit_button_srgba(&mut self.color).changed().then(||{
                     self.alpha = self.color.a() as f32 / 255.0;
                 });
-            });
+                
     }
 
     fn macroquad_color(&self) -> macroquad::color::Color {
@@ -188,17 +182,17 @@ async fn main() {
     let mut zoom = 1.0;
     let mut delta = Instant::now();
 
-    let mut selected_drawing= 0;
 
     let mut new_from_index: Option<usize> = None;
 
-    let mut scrapbook_open = false;
 
     let mut save = Instant::now();
 
     let mut saved_thread: Option<JoinHandle<()>> = None;
 
     let mut mouse_pos = egui::Vec2::ZERO;
+
+    let mut selected_drawing = 9999;
     
     // list dir
     if let Ok(dir) = read_dir("img") {
@@ -218,15 +212,20 @@ async fn main() {
         }
     }
 
+    drawing_list.sort();
+    drawing_list.dedup();
+
     
 
 
     egui_macroquad::ui(|egui_ctx| {
+
             
         egui_ctx.set_visuals(egui::Visuals::light());
     });
     
-    
+    let name_list = include_str!("text.txt").lines().map(|f| f.to_owned()).collect::<Vec<String>>();
+
     
     loop {
             let mut scroll_delta = 0.0;
@@ -249,30 +248,32 @@ async fn main() {
 
 
         let mut hover = false;
-        let mut new_random = false;
         let mut draw_on_image = false;
 
         if save.elapsed().as_secs_f32() > 5.0 {
+            println!("saving 1");
+            println!("{}",new_data.is_some());
 
             save_data.save();
 
             if let Some(new_data) = &new_data {
 
                 // spawn thread
-
-
+            
+                println!("saving 2");
 
                 let new_data = new_data.clone();
-                let selected_drawing = selected_drawing;
 
                 if let Some(ref mut save_thread2) = saved_thread {
                     if save_thread2.is_finished() {
                         saved_thread = None;
+                        println!("saved 2");
                     }
                 }
                 if saved_thread.is_none() {
                 saved_thread = Some(std::thread::spawn(move || {
                     // save image
+                    println!("saving {selected_drawing}");
                     let path = format!("img/sketch_{num}/new_sketch_{num}.jpg", num=selected_drawing);
                     let raw = new_data.get_image_data().to_vec();
                     // convert [u8;4] to [u8;3]
@@ -281,7 +282,9 @@ async fn main() {
                     // jpeg from raw
                     let encoder = Encoder::new_file(path, 100);
                     if let Ok(encoder) = encoder {
-                        println!("{:?}", encoder.encode(&raw, new_data.width() as u16, new_data.height() as u16, ColorType::Rgb));
+                        if let Err(a) =  encoder.encode(&raw, new_data.width() as u16, new_data.height() as u16, ColorType::Rgb) {
+                            println!("Error: {}", a);
+                        }
                     };
                 }));
             }
@@ -302,43 +305,18 @@ async fn main() {
 
 
         egui_macroquad::ui(|egui_ctx| {
-            pen.render_pen(egui_ctx);
-
-
-            egui::Window::new("Scrapbook").open(&mut scrapbook_open).show(egui_ctx, |ui|{
-                egui::SidePanel::left("scrapbook_left").show_inside(ui, |ui|{
-                    for d in drawing_list.iter() {
-                        if ui.button(format!("{}: {}", d, save_data.names.get(&d).unwrap_or(&"no name".to_owned()))).clicked() {
-                            selected_drawing = *d;
-                        }
-                }
-            });
-            if drawing_list.contains(&selected_drawing) {
-            ui.horizontal(|ui| {
-                ui.label("Name:");
-                if let Some(name) = save_data.names.get_mut(&selected_drawing) {
-                    ui.text_edit_singleline(name);
-                }else {
-                    save_data.names.insert(selected_drawing, "no name".to_owned());
-                }
-            });
-            if ui.button("Load").clicked() {
-                new_from_index = Some(selected_drawing);
-            }
-        }  
-            });
-
+            
+            
+            
+            
             
 
             let rect_sidebar = egui::SidePanel::left("side_panel").show(egui_ctx, |ui| {
                 ui.heading("Placeholder Text");
-                if ui.button("Pen").clicked() {
-                    pen.window_open = !pen.window_open;
-                }
-                if ui.button("scrapbook").clicked() {
-                    scrapbook_open = !scrapbook_open;
-                }
-                new_random= ui.button("New").clicked();
+                ui.hyperlink_to("BHL", "https://www.biodiversitylibrary.org/");
+                ui.separator();
+
+                pen.render_pen(ui);
 
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -366,11 +344,54 @@ async fn main() {
                 });
             }).response.rect;
 
-            
+            let rect_sidebar_right = egui::SidePanel::right("right_side_panel").show(egui_ctx, |ui| {
+                ui.separator();
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    ui.collapsing("Current Pages", |ui| {
+                    for i in drawing_list.iter() {
+                            ui.horizontal(|ui| {
+                            if selected_drawing == *i {
+                                ui.label(">");
+                            }
+                            ui.label(format!("Pg. {i}"));
+                            if drawing_list.contains(&i) {
+                                if ui.button("Open").clicked() {
+                                    new_from_index = Some(*i);
+                                    
+                                }
+                            } else {
+                                if ui.button("Unpack").clicked() {
+                                    new_from_index = Some(*i);
+                                }
+                            }
+                        });
+                    }});
+                    ui.collapsing("All Pages", |ui| {
+                    for i in 0..name_list.len() {
+                            ui.horizontal(|ui| {
+                            if selected_drawing == i {
+                                ui.label(">");
+                            }
+                            ui.label(format!("Pg. {i}"));
+                            if drawing_list.contains(&i) {
+                                if ui.button("Open").clicked() {
+                                    new_from_index = Some(i);
+                                    
+                                }
+                            } else {
+                                if ui.button("Unpack").clicked() {
+                                    new_from_index = Some(i);
+                                }
+                            }
+                        });
+                    }});
+                });
+            }).response.rect;
             
             
             rect = egui_ctx.screen_rect();
             rect.set_left(rect_sidebar.right());
+            rect.set_right(rect_sidebar_right.left());
             rect = rect.expand2([rect.width()-rect.width()*zoom, rect.height()-rect.height()*zoom].into());
             rect = rect.translate(offset);
 
@@ -404,32 +425,17 @@ async fn main() {
                 }
             }
             drawing = Some(Drawing::load(n).await);
+            selected_drawing = n;
             new_from_index = None;
-            scrapbook_open = false;
+            drawing_list.push(n);
+            // remove duplicates
+            drawing_list.sort();
+            drawing_list.dedup();
         }
 
 
 
 
-        if new_random {
-            let mut rng = thread_rng();
-            let name_list = include_str!("text.txt").lines().map(|f| f.to_owned()).collect::<Vec<String>>();
-
-            let num = rng.gen_range(0..name_list.len());
-            selected_drawing = num;
-            drawing_list.push(num);
-
-            if let Some(draw) = drawing {
-                if let Some(pic) = draw.new_image {
-                    pic.delete();
-                }
-                if let Some(pic) = draw.og_image {
-                    pic.delete();
-                }
-            }
-            
-            drawing = Some(Drawing::load(num).await);
-        }
 
         
         if let Some(Drawing {new_image: Some(image), ..}) = drawing {
@@ -472,15 +478,15 @@ match og_data {
                     new_data = Some(image.get_texture_data());
                 }
 
-                if let Some(ref mut new_data) = new_data {
-                    let scale = new_data.width() as f32 / rect.width();
+                if let Some(ref mut new_data2) = new_data {
+                    let scale = new_data2.width() as f32 / rect.width();
                 mouse_pos.0 *= scale;
-                mouse_pos.1 *= new_data.height() as f32 / rect.height();
+                mouse_pos.1 *= new_data2.height() as f32 / rect.height();
                 
                 let pen_rect = egui::Rect::from_min_size([mouse_pos.0-pen.size*scale, mouse_pos.1-pen.size*scale].into(), [pen.size*scale*2.0, pen.size*scale*2.0].into());
 
-                for y in pen_rect.top().max(0.0) as usize..(pen_rect.bottom() as usize).min(new_data.height()) {
-                    for x in pen_rect.left().max(0.0) as usize..(pen_rect.right() as usize).min(new_data.width()) {
+                for y in pen_rect.top().max(0.0) as usize..(pen_rect.bottom() as usize).min(new_data2.height()) {
+                    for x in pen_rect.left().max(0.0) as usize..(pen_rect.right() as usize).min(new_data2.width()) {
                         
                         if (mouse_pos.0 - x as f32).powi(2) + (mouse_pos.1 - y as f32).powi(2) < (scale*pen.size).powi(2) {
                             let mut pixel = og_data.get_pixel(x as u32, y as u32);
@@ -488,12 +494,12 @@ match og_data {
                             pixel.g = pixel.g  * (1.0-pen.color.a() as f32/255.0) + pen.color.g() as f32/255.0 * pen.color.a()as f32/255.0;
                             pixel.b = pixel.b  * (1.0-pen.color.a() as f32/255.0) + pen.color.b() as f32/255.0 * pen.color.a()as f32/255.0;
 
-                            new_data.set_pixel(x as u32, y as u32, Color::new(pixel.r, pixel.g, pixel.b, 1.0));
+                            new_data2.set_pixel(x as u32, y as u32, Color::new(pixel.r, pixel.g, pixel.b, 1.0));
                         }
                     }
                 }
 
-                image.update(&new_data);
+                image.update(&new_data2);
             }
             }
             
@@ -503,6 +509,8 @@ match og_data {
             if let Some(new_og_data) =  drawing.as_ref().unwrap().og_image {
                 og_data = Some(new_og_data.get_texture_data());
             };
+
+            
         }
     }
                 

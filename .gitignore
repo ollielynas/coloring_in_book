@@ -1,3 +1,5 @@
 /target
 *.jpg
 *.stackdump
+/image_list
+*sketch_*
