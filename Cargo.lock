@@ -25,7 +25,6 @@ dependencies = [
  "egui 0.21.0",
  "egui-macroquad",
  "egui-phosphor",
- "egui_extras",
  "image",
  "jpeg-encoder",
  "macroquad",
@@ -450,16 +449,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63aae68e31b994955bafd3dbc9e82b0a92f5363e91c28246d79b8b8c1ff73a9f"
 dependencies = [
  "egui 0.22.0",
-]
-
-[[package]]
-name = "egui_extras"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9278f4337b526f0d57e5375e5a7340a311fa6ee8f9fcc75721ac50af13face02"
-dependencies = [
- "egui 0.22.0",
- "serde",
 ]
 
 [[package]]
@@ -1347,20 +1336,6 @@ name = "serde"
 version = "1.0.163"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2113ab51b87a539ae008b5c6c02dc020ffa39afd2d83cffcb3f4eb2722cebec2"
-dependencies = [
- "serde_derive",
-]
-
-[[package]]
-name = "serde_derive"
-version = "1.0.163"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c805777e3930c8883389c602315a24224bcc738b63905ef87cd1420353ea93e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.18",
-]
 
 [[package]]
 name = "sha1"

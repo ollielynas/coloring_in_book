@@ -7,7 +7,6 @@ use ImageFormat::Jpeg;
 use std::{fs::{File, read_dir}, path::PathBuf, str::FromStr, io::Write, collections::HashMap, time::Instant, thread::JoinHandle};
 use zip_extensions::*;
 use ::rand::{thread_rng, Rng}; // 0.8.5
-use egui_extras::RetainedImage;
 
 extern crate savefile;
 use savefile::prelude::*;
@@ -20,11 +19,9 @@ extern crate savefile_derive;
 const SPEED: f32 = 160.0;
 
 struct Drawing {
-    name: String,
     path: PathBuf,
     og_image: Option<macroquad::texture::Texture2D>,
     new_image: Option<macroquad::texture::Texture2D>,
-    ratio: f32,
 
 }
 
@@ -73,12 +70,9 @@ impl Drawing {
                 Ok(tex) => Some(tex),
                 Err(e) => panic!("Failed to load texture: {}", e),
     };
-    let ratio = match image {
-        Some(img) => img.width() as f32 / img.height() as f32,
-        None => 1.0,
-    };
+
         
-        Drawing { name:name.clone(), path:entry_path, ratio, og_image: image, new_image
+        Drawing { path:entry_path, og_image: image, new_image
         
         
         }
@@ -181,7 +175,7 @@ impl Data {
 #[macroquad::main("Darwin's Coloring in Book")]
 async fn main() {
 
-    let mut save_data = Data::new();
+    let mut save_data = Data::load();
 
     let mut drawing: Option<Drawing> = None;
     let mut pen = Pen::default();
@@ -203,6 +197,8 @@ async fn main() {
     let mut save = Instant::now();
 
     let mut saved_thread: Option<JoinHandle<()>> = None;
+
+    let mut mouse_pos = egui::Vec2::ZERO;
     
     // list dir
     if let Ok(dir) = read_dir("img") {
@@ -228,11 +224,12 @@ async fn main() {
     egui_macroquad::ui(|egui_ctx| {
             
         egui_ctx.set_visuals(egui::Visuals::light());
-        });
-
-
-        
-        loop {
+    });
+    
+    
+    
+    loop {
+            let mut scroll_delta = 0.0;
 
         // prevent close
         
@@ -245,7 +242,6 @@ async fn main() {
         }
 
         
-        let mut scroll_delta = 0.0;
         clear_background(WHITE);
 
         let delta_sec = delta.elapsed().as_secs_f32();
@@ -258,7 +254,7 @@ async fn main() {
 
         if save.elapsed().as_secs_f32() > 5.0 {
 
-            
+            save_data.save();
 
             if let Some(new_data) = &new_data {
 
@@ -297,33 +293,7 @@ async fn main() {
         }
 
 
-        if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
-            offset.x += SPEED*delta_sec;
-        }
-        if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
-            offset.x -= SPEED*delta_sec;
-        }
-        if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
-            offset.y += SPEED*delta_sec;
-        }
-        if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
-            offset.y -= SPEED*delta_sec;
-        }
-
         
-        if is_key_down(KeyCode::Equal) {
-            scroll_delta -= 0.1*delta_sec;
-        }
-        if is_key_down(KeyCode::Minus) {
-            scroll_delta += 0.1*delta_sec;
-        }
-        if is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl) {
-            zoom += scroll_delta;
-        }
-
-        if is_key_down(KeyCode::Q) {
-            pen.size = (pen.size - scroll_delta * 100.0).clamp(0.0, 30.0);
-        }
 
         
 
@@ -409,7 +379,7 @@ async fn main() {
             draw_on_image = !egui_ctx.wants_pointer_input() && egui_ctx.input(
                 |i| 
                 {
-                scroll_delta = i.scroll_delta.y*1000.0;
+                    scroll_delta = i.scroll_delta.y/100.0;
                 i.pointer.button_down(egui::PointerButton::Primary)
                 }
             );
@@ -541,6 +511,34 @@ match og_data {
 }
 
         egui_macroquad::draw();
+
+        if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
+            offset.x += SPEED*delta_sec;
+        }
+        if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
+            offset.x -= SPEED*delta_sec;
+        }
+        if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
+            offset.y += SPEED*delta_sec;
+        }
+        if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
+            offset.y -= SPEED*delta_sec;
+        }
+
+        
+        if is_key_down(KeyCode::Equal) {
+            scroll_delta -= 0.1*delta_sec;
+        }
+        if is_key_down(KeyCode::Minus) {
+            scroll_delta += 0.1*delta_sec;
+        }
+        if is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl) {
+            zoom += scroll_delta*2.0;
+        }
+
+        if is_key_down(KeyCode::Q) {
+            pen.size = (pen.size - scroll_delta * 100.0).clamp(0.0, 30.0);
+        }
         
         // Draw things after egui
 
