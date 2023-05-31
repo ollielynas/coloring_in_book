@@ -113,7 +113,9 @@ impl Pen {
 
                 
                 ui.add(egui::Slider::new(&mut self.size, 0.0..=30.0).text("size"));
-                ui.add(egui::Slider::new(&mut self.alpha, 0.0..=1.0).text("alpha")).changed().then(|| {
+                ui.style_mut().visuals.extreme_bg_color = self.color;
+                ui.add(egui::Slider::new(&mut self.alpha, 0.0..=0.25).trailing_fill(true)
+                .text("alpha")).changed().then(|| {
                     self.color = Color32::from_rgba_premultiplied(self.color.r(), self.color.g(), self.color.b(), (self.alpha * 255.0) as u8);
                 });
                 ui.checkbox(&mut self.inside_circle, "inside circle");
@@ -131,12 +133,14 @@ impl Pen {
 #[derive(Savefile)]
 struct Data {
     saved_pens: Vec<Pen>,
-    names: HashMap<usize, String>
+    names: HashMap<usize, String>,
+    ui_scale: f32,
 }
 
 impl Data {
     fn new() -> Self {
         Data {
+            ui_scale: 1.0,
             saved_pens: vec![Pen::default()],
             names: HashMap::new(),
         }
@@ -193,6 +197,8 @@ async fn main() {
     let mut mouse_pos = egui::Vec2::ZERO;
 
     let mut selected_drawing = 9999;
+
+    let mut og_pxpp = 0.0;
     
     // list dir
     if let Ok(dir) = read_dir("img") {
@@ -220,7 +226,8 @@ async fn main() {
 
     egui_macroquad::ui(|egui_ctx| {
 
-            
+        og_pxpp = egui_ctx.pixels_per_point();
+        egui_ctx.set_pixels_per_point(og_pxpp * save_data.ui_scale);
         egui_ctx.set_visuals(egui::Visuals::light());
     });
     
@@ -318,6 +325,18 @@ async fn main() {
 
                 pen.render_pen(ui);
 
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Scale:");
+                    if ui.small_button("-").clicked() {
+                        save_data.ui_scale *= 0.9;
+                        egui_ctx.set_pixels_per_point(og_pxpp * save_data.ui_scale);
+                    }
+                    if ui.small_button("+").clicked() {
+                        save_data.ui_scale *= 1.1;
+                        egui_ctx.set_pixels_per_point(og_pxpp * save_data.ui_scale);
+                    }
+                });
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("Movement:");
@@ -424,8 +443,8 @@ async fn main() {
                     pic.delete();
                 }
             }
-            drawing = Some(Drawing::load(n).await);
             selected_drawing = n;
+            drawing = Some(Drawing::load(selected_drawing).await);
             new_from_index = None;
             drawing_list.push(n);
             // remove duplicates
